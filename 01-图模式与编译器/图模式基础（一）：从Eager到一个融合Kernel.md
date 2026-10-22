@@ -116,7 +116,7 @@ TORCHINDUCTOR_NPU_BACKEND=triton_experimental
   → 注册 NPU scheduling/wrapper、device override/interface、fallback 与 MSPTI autotune
 ```
 
-这只说明后端如何接入，不等于本例已经在 NPU 上成功编译，更不等于已经融合成一个 kernel。后两个结论必须由真实编译产物和输出对比验证。
+本节在 Ascend 910B2 上实际验证了这条路径：设置 `TORCHINDUCTOR_NPU_BACKEND=triton_experimental` 后，生成的 `output_code.py` 导入 `torch_npu._inductor.triton_experimental.npu_triton_heuristics`，并将 kernel 的 device 标为 `npu`。这把“选了哪个后端”落实到了生成代码证据。
 
 ## 6. 本节验证记录
 
@@ -125,19 +125,22 @@ TORCHINDUCTOR_NPU_BACKEND=triton_experimental
 - 使用独立 Python 标量实现执行了第 4 节给定矩阵：结果为 `[[11, 18, 0], [44, 0, 54]]`。
 - 用 `N = 6`、`BLOCK = 4` 验算了 grid 数为 2，尾块只有索引 4、5 通过 `mask`。
 - 阅读本地 `torch_npu/_inductor/__init__.py` 与 `torch_npu/_inductor/triton_experimental/__init__.py`，确认了上述 `triton_experimental` loader/activation 的注册顺序。
+- 2026-10-22 在 Ascend 910B2 容器环境运行了 `torch.compile(..., backend="inductor", fullgraph=True)`，并明确设置 `TORCHINDUCTOR_NPU_BACKEND=triton_experimental`。环境为 `torch 2.13.0+cpu`、`torch_npu 2.13.0+gite94cbac`、CANN 9.2.0；NPU 可用且设备数为 8。
+- `2×3` 矩阵的 eager 与 compiled 结果都为 `[[11, 18, 0], [44, 0, 54]]`，与公式手算一致。
+- 对一维长度 `1、5、7、17` 的输入重复编译并比较 eager/compiled，全部通过。这些长度包含小于 tile 的输入和非整齐尾块，可以检查生成 mask 是否保护最后一组有效元素。
+- FX Graph 中能看到 `aten.add → aten.relu` 两个节点；`ir_post_fusion.txt` 中是一个包含 `add` 和 `relu` 的 scheduler node；生成的 `output_code.py` 只有 `triton_unk_fused_add_relu_0` 一个 kernel，并在 wrapper 中调用一次 `.run(...)`。因此这次实验确实验证了融合，不只是输出相等。
+- 生成代码使用 `npu_triton_heuristics.pointwise`，设备元数据为 `Ascend910B2`，并在 kernel 中以 `x0index < x0numel` 生成尾块 mask。
 
-### 尚待真实设备验证
+### 本次仍未验证
 
-- Dynamo 实际捕获到的 FX Graph；
-- 是否产生 graph break；
-- `add + relu` 是否生成一个融合 kernel；
-- GPU 与 NPU 输出、生成代码、grid/block 与性能差异。
+- GPU Triton 的对应生成代码和 NPU/GPU 性能差异；本课只验证 NPU 正确性与融合结构，没有做性能基准。
+- 不同 dtype、非连续 stride、动态 shape、训练反向图，以及更大张量下的 tile 与实际 grid 配置。
 
-当前学习环境没有可导入的 `torch` 包，因此没有把“公式正确”误报为“编译器正确”。
+编译日志出现一次 CANN/NPU allocator 关于 32-byte padding 的 warning，但本次数值检查通过；本课没有据此推断性能或内存影响。调试产物路径中的机器用户名和绝对目录不写入知识库，归档时统一记为 `<CONTAINER_ROOT>` 与 `<TORCHINDUCTOR_CACHE_DIR>`。
 
-## 7. 下一次在 GPU/NPU 环境运行的最小实验
+## 7. 最小实验代码与运行要点
 
-先保存为 `elementwise_fusion.py`，并仅在小张量上打开 debug：
+本次实际执行的核心代码如下。用 `fullgraph=True` 让无法纳入完整图的操作直接报错，这样成功返回可证明本函数没有静默切成多个 Dynamo 图段：
 
 ```python
 import torch
@@ -145,23 +148,26 @@ import torch
 def f(x, y):
     return (x + y).relu()
 
-device = "cuda"  # NPU 时改为 "npu"，并设置对应 backend
+device = "npu"
 x = torch.tensor([[1., -2., 3.], [4., 5., -6.]], device=device)
 y = torch.tensor([[10., 20., -30.], [40., -50., 60.]], device=device)
 
-compiled_f = torch.compile(f)
+compiled_f = torch.compile(f, backend="inductor", fullgraph=True)
 eager = f(x, y)
 compiled = compiled_f(x, y)
 torch.testing.assert_close(compiled, eager)
 print(compiled.cpu())
 ```
 
-建议观察顺序：
+本次在容器中 source CANN 9.2.0 环境脚本，并给该 Python 进程设置：
 
-1. `compiled` 是否等于 eager 的期望矩阵；
-2. `TORCH_LOGS="+graph_code,output_code,inductor"` 下的 FX graph 与生成代码；
-3. 生成代码中是否把 `add`、`maximum/relu` 放在同一 kernel；
-4. 对 NPU 记录 `TORCHINDUCTOR_NPU_BACKEND`、dtype、shape、dynamic、ACLGraph 与 fallback 信息，避免把不同执行路径混为一次对比。
+```bash
+TORCHINDUCTOR_NPU_BACKEND=triton_experimental
+TORCH_COMPILE_DEBUG=1
+TORCHINDUCTOR_CACHE_DIR=<TORCHINDUCTOR_CACHE_DIR>
+```
+
+复核编译融合时依次看：FX graph 是否有 `add → relu`；`ir_post_fusion.txt` 是否只剩一个调度节点；`output_code.py` 是否只生成一个 fused kernel 并只 launch 一次。数值相等是正确性证据，生成代码与 IR 才是融合证据。
 
 ## 8. 自检题
 
