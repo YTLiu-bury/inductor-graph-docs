@@ -23,6 +23,14 @@ PyTorch Inductor、NPU 图模式、Triton Experimental 与 Benchmark 看护知�
 4. 上游行为与 NPU 特化分开描述，避免把 NPU 流水策略误写成 PyTorch 社区通用规则。
 5. 新增文档先放入对应分类；暂时无法归类的内容放入待整理区，不直接混入主目录。
 
+## 可安装的 Agent Skills
+
+本仓也维护可复用的 Agent Skill，使用标准的 `SKILL.md` 目录结构：
+
+- [Inductor 编译产物与性能分析](skills/inductor-compile-artifact-analysis/SKILL.md)：分析 FX/Inductor IR/生成代码与 profiler，并进行 NPU/GPU 对照。
+
+Codex 用户可在对话中调用 `$skill-installer`，指定仓库 `YTLiu-bury/inductor-graph-docs` 和路径 `skills/inductor-compile-artifact-analysis`；也可以把该目录复制到本机 `%USERPROFILE%\\.codex\\skills\\`（Linux/macOS 为 `~/.codex/skills/`）。安装后在新的 Codex 对话中调用。其他 Agent 若支持 Agent Skills/`SKILL.md`，可将同一目录安装到其个人 skills 目录；具体目录和刷新方式以对应 Agent 为准。
+
 ## 文档状态
 
 当前内容由既有 Benchmark、Inductor 和 NPU 问题记录整理而来。原始工作仓中的文件不被本仓反向修改；本仓副本会持续做脱敏、校正和结构化维护。

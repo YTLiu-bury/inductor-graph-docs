@@ -1,0 +1,3 @@
+interface:
+  display_name: "Inductor Artifact Analysis"
+  short_description: "Trace compiled graphs, kernels, profiles, and performance"
