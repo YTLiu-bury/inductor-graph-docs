@@ -79,6 +79,27 @@ torch.compile
 
 图模式基础课程目前已覆盖 eager/融合、FX 到 Inductor IR、shape guards、graph break、AOTAutograd，并继续用 [stride 与地址映射](图模式基础（六）：Shape不等于Layout——stride与地址.md) 区分逻辑 shape 与物理布局。
 
+### 课程讲解方式：由直觉逐步走向实现与推导
+
+课程按依赖关系逐层加深，不要求初学阶段一开始就读后端源码；但每个概念最终都要能落到可验证的代码、公式或实现路径上。单课尽量采用同一节奏：
+
+1. **先建立直觉**：用简单例子说明“它解决什么问题”，先区分相似概念。
+2. **再手算小例子**：给出具体输入、逐步推导公式和预期值，让读者可以独立复核。
+3. **再看技术对象**：追踪 FX/Inductor IR、guard、layout、scheduler 或代码生成中的对应信息。
+4. **再做实验验证**：优先用最小可运行用例；NPU 实验显式设置 `TORCHINDUCTOR_NPU_BACKEND=triton_experimental`，同时比较数学预期、eager 和编译结果。
+5. **最后说明边界**：标明已实测、从源码确认、合理推断和待验证的内容；正确性、编译行为与性能分别验证，不把一次小例子扩大成普遍结论。
+
+数学难点会按需要拆成可逐步掌握的工具：张量坐标到线性地址的映射、stride 与 storage offset、索引线性化/反线性化、广播、分块（tiling）边界、归约的分组与数值误差等。技术难点则沿编译器流水逐步展开：图捕获和 specialization、IR 变换、layout 表达、scheduler 决策、kernel/codegen、runtime 与缓存。每次只引入后续理解所必需的前置知识，再用案例把公式和实现接起来。
+
+### Triton Experimental、社区 Inductor 与 Triton-Ascend 的讲解边界
+
+- **前期先学编译器共同基础**：围绕 PyTorch/社区 Inductor 的图捕获、IR、guards、调度、融合和布局建立基线；课程早期不急着把 Triton-Ascend 拉进来，以免混淆图级语义与 kernel 后端实现。
+- **随后识别 TE 的上游基线与 NPU 差异**：Triton Experimental（TE）总体沿用社区 Inductor 的编译器骨架，同时为 NPU 适配或改造的组件与算法需要单独追踪。学习时按“社区基线做什么 → NPU 约束是什么 → TE 改了什么 → 为什么这么改 → 用什么例子验证”逐项对照，避免把 NPU 特化写成上游通用行为。
+- **到 codegen 阶段再系统讲 Triton-Ascend**：沿一条真实算子追踪 TE 从 Inductor IR/调度到生成的 Triton 风格代码，再进入 Triton-Ascend 的编译、后端和设备执行路径；对照 GPU Triton，厘清接口、职责和数据流。此时再讨论三者关联，并以对应版本源码和实测为依据，不预设它们是同一个组件或只存在简单替换关系。
+- **把算法适配当作核心课程内容**：对 NPU 特化的 lowering、layout、索引映射、tiling/分块、融合边界、归约或 autotune 等具体改造，逐个选源码与最小案例分析。说明它与社区算法的差异、正确性约束及适用范围；只有实际测量后才给出性能结论。
+
+因此，课程顺序是“共同图编译基础 → 社区 Inductor 关键路径 → TE 的 NPU 适配与算法改造 → codegen 阶段的 Triton-Ascend/GPU Triton 对照 → 端到端验证”，每个阶段都穿插手算、源码和小实验，而不是把工具名堆在一起介绍。
+
 ### 第 1 阶段：学习 GPU Triton 基线
 
 阅读顺序：
