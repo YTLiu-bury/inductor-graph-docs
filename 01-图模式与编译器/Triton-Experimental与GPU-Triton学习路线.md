@@ -77,6 +77,8 @@ torch.compile
 
 > 一个 `x + y` 从 Python 调用到 NPU kernel 启动，中间经过哪些对象？
 
+图模式基础课程目前已覆盖 eager/融合、FX 到 Inductor IR、shape guards、graph break、AOTAutograd，并继续用 [stride 与地址映射](图模式基础（六）：Shape不等于Layout——stride与地址.md) 区分逻辑 shape 与物理布局。
+
 ### 第 1 阶段：学习 GPU Triton 基线
 
 阅读顺序：
