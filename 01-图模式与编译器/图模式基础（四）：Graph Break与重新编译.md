@@ -60,9 +60,9 @@ f(x)  = G2(G1(x)) = 2 * max(x + 1, 0)
 
 这对定位非常有用：先用 `fullgraph=True` 找到无法捕获的位置，再决定是改写代码、接受分段，还是把特定函数排除在编译外。若刻意写入 `torch._dynamo.graph_break()`，fullgraph 模式下报错是本例的预期行为，不等于 NPU kernel 运行时故障。
 
-## 最小 NPU 实验：待设备恢复后执行
+## 最小 NPU 实验与实测
 
-当前记录日期（2026-10-27）无法连到之前使用的 NPU 主机：SSH TCP/22 连接超时；本地环境也没有安装 PyTorch。因此下面是待实测脚本，不记录为已验证的 NPU 结果。
+2026-10-27 首次记录时，旧 NPU 主机连接超时，本地也无 PyTorch，所以当时只保留了待实测脚本。2026-11-02 换到一台 Ascend 950DT 后，使用 PyTorch `2.13.0+cpu`、torch_npu `2.13.0+git13057da`、CANN `9.2.0`，显式设置 `TORCHINDUCTOR_NPU_BACKEND=triton_experimental`，完成了下面这个小例子的 NPU 正确性验证。
 
 ```python
 import torch
@@ -84,7 +84,9 @@ torch.testing.assert_close(actual, expected)
 print(actual.cpu().tolist())  # 预期 [0.0, 0.0, 2.0, 8.0]
 ```
 
-使用 `TORCHINDUCTOR_NPU_BACKEND=triton_experimental`，分别设置 `TORCH_LOGS=graph_breaks` 与 `TORCH_LOGS=output_code` 观察。先检查结果是否符合手算；然后检查生成代码/日志确认 graph break 前后是否各形成了编译区域，以及各自实际发射多少 kernel。**不能只凭 break 的个数推断 kernel launch 数或性能损失**：融合、代码生成和运行时行为需要查看实物产物；拆段可能阻断跨边界融合，也可能带来额外调度/launch 开销，但当前环境不可达，尚未测量。
+实测输入 `[-2, -1, 0, 3]`，`fullgraph=False`，日志 `TORCH_LOGS=graph_breaks` 明确报告在函数第 3 行遇到用户插入的 `torch._dynamo.graph_break()`；编译结果为 `[0, 0, 2, 8]`，与 eager 结果一致。该验证确认 Dynamo 记录并跨越了显式 break 完成执行，但没有测量耗时，也没有据此断言 kernel launch 数量。
+
+如果继续检查 `TORCH_LOGS=output_code`，可观察每个已编译片段的生成代码。**不能只凭 break 的个数推断 kernel launch 数或性能损失**：融合、代码生成和运行时行为需要查看实物产物；拆段可能阻断跨边界融合，也可能带来额外调度/launch 开销，本课没有做性能测量。
 
 运行 `fullgraph=True` 的对照时，预期会因为人工插入的 break 无法满足“一整个图”的要求而失败；该检查应放在独立进程，并把预期异常与数值正确性实验分开。
 
@@ -93,7 +95,7 @@ print(actual.cpu().tolist())  # 预期 [0.0, 0.0, 2.0, 8.0]
 - Graph break = 一次执行分成多个 FX 子图；不意味着整段函数都退回 eager。
 - Recompile = 某个子图的 guard 失效，需要再编一个版本；不是把 Python 执行切成更多段。
 - 正确性先用公式和 eager 对比；性能再检查子图融合、生成 kernel 与 launch，不能把“compile 成功”当作性能结论。
-- NPU 实测仍待连接恢复后补充；本页的计算表是手算验证，代码块是待运行实验，不是运行记录。
+- NPU 小张量正确性已实测通过；尚未测 graph break 对 kernel 数量或性能的影响。
 
 ## 参考
 

@@ -67,11 +67,11 @@ torch.compile(backend="inductor")
   -> triton_experimental/Inductor 编译后端处理对应图
 ```
 
-此处还不能仅凭 `torch.compile()` 返回成功就认定两个方向都已在 NPU 上正确执行；需要跑 forward、backward，对比 eager 的 loss 与输入梯度，并查看 AOT 图日志。推理场景没有梯度需求，不会因为使用 `torch.compile` 就凭空产生有用的 backward 工作。
+不能仅凭 `torch.compile()` 返回成功就认定两个方向都已在 NPU 上正确执行；需要跑 forward、backward，对比 eager 的 loss 与输入梯度，并查看 AOT 图日志。推理场景没有梯度需求，不会因为使用 `torch.compile` 就凭空产生有用的 backward 工作。
 
-## NPU 最小实验（本次尚未运行）
+## NPU 最小实验与实测
 
-当前无法连到实验 NPU 主机，且本地 Python 环境没有 PyTorch，因此以下脚本是待设备恢复后的复现步骤，不是已通过的实测记录。
+以下实验最初因实验 NPU 主机连接超时而未运行。2026-11-02 在 Ascend 950DT 上补跑，环境为 PyTorch `2.13.0+cpu`、torch_npu `2.13.0+git13057da`、CANN `9.2.0`，且显式设置 `TORCHINDUCTOR_NPU_BACKEND=triton_experimental`。
 
 ```python
 import torch
@@ -104,15 +104,17 @@ torch.testing.assert_close(
 - `aot_graphs`：观察 AOTDispatch 划分后的 forward/backward 图；
 - `output_code`：观察 Inductor 生成的后端代码。
 
-预期的数学结果是 `loss=10`、梯度 `[0, 2, 6]`。实际输出、图数量、保存/重算决策和 kernel 数量仍需在目标 PyTorch/torch_npu/CANN 版本上运行后记录；不要把“预期值”误写成“设备实测值”。
+实测结果：编译前向并调用 `backward()` 后，loss 为 `10.0`，梯度为 `[0.0, 2.0, 6.0]`；编译与 eager 的 loss/grad 比较均通过。`aot_joint_graph` 输出了包含 `add -> pow -> sum` 以及梯度计算的联合图；`aot_graphs` 分别输出 Forward graph 0 和 Backward graph 0。这个样例的前向图返回 loss 和输入 primal，反向图接收 primal 与 tangent，并重新执行 `add`/幂次相关计算后得到梯度，说明本例选择了重算这些中间结果，而不是把 `u=x+1` 作为 forward 输出保存给 backward。
+
+这个结论只针对上述小函数和软件栈；没有做显存/耗时测量，也不能推导更大模型的 partitioner 一定采用相同的保存/重算策略。数学预期与实测相符，但训练正确性还需在其他 shape、dtype 和模型上继续扩展验证。
 
 ## 本课记忆卡
 
 - 前向图描述怎么产生输出；反向图描述上游梯度如何传回输入/参数。
-- AOTAutograd 在编译阶段准备前向与反向图；Autograd engine 在运行时负责触发 backward。
+- AOTAutograd 在编译阶段准备前向与反向图；本例的 NPU AOT 日志已实测看到 joint/forward/backward graphs，Autograd engine 在运行时负责触发 backward。
 - 反向依赖前向信息，因此图划分还要考虑保存哪些激活、哪些值可重算。
 - graph break 是分段；每个可微分段都可能对应 backward 图段，并非一张完整反向图必然覆盖整个 Python 函数。
-- 精度验证要比较 loss 和 `.grad`；只看 forward 输出不足以证明训练正确。
+- 精度验证要比较 loss 和 `.grad`；本例 NPU 与 eager 的两者比较均通过，只看 forward 输出不足以证明训练正确。
 
 ## 参考
 
