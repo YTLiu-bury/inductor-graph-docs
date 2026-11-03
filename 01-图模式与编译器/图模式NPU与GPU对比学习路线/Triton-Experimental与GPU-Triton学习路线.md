@@ -77,7 +77,7 @@ torch.compile
 
 > 一个 `x + y` 从 Python 调用到 NPU kernel 启动，中间经过哪些对象？
 
-图模式基础课程目前已覆盖 eager/融合、FX 到 Inductor IR、shape guards、graph break、AOTAutograd，并用 [stride 与地址映射](图模式基础（六）：Shape不等于Layout——stride与地址.md) 和 [contiguous 的物化成本](图模式基础（七）：contiguous不是免费操作.md) 逐步理解逻辑 shape 与物理布局。
+图模式基础课程目前已覆盖 eager/融合、FX 到 Inductor IR、shape guards、graph break、AOTAutograd，并通过 [stride 与地址映射](图模式基础（六）：Shape不等于Layout——stride与地址.md)、[contiguous 的物化成本](图模式基础（七）：contiguous不是免费操作.md) 和 [广播与零步长 stride](图模式基础（八）：广播与零步长stride.md) 逐步理解逻辑 shape 与物理布局。
 
 ### 课程讲解方式：由直觉逐步走向实现与推导
 
